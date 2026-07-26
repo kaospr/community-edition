@@ -1,0 +1,98 @@
+# Kamal 2 deployment for Plausible Community Edition.
+# Replace the PLACEHOLDER values (server IP and domain) before deploying.
+service: plausible
+image: plausible
+
+servers:
+  web:
+    hosts:
+      - 159.69.26.251 # PLACEHOLDER: your server's public IP
+    # Same boot sequence as compose.yml: create DBs, migrate, then run.
+    cmd: sh -c "/entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run"
+    options:
+      ulimit: "nofile=65535:65535"
+
+proxy:
+  ssl: true # kamal-proxy terminates TLS with Let's Encrypt
+  host: analytics.sifanu.com # PLACEHOLDER: your domain (must match BASE_URL)
+  app_port: 8000
+  healthcheck:
+    path: /api/health
+    interval: 3
+    timeout: 30
+
+# Kamal starts and manages a local Docker registry on this port.
+registry:
+  server: localhost:5555
+
+builder:
+  arch: amd64
+
+# Named volume for user uploads, exports and TMPDIR (persists across deploys).
+volumes:
+  - "plausible-data:/var/lib/plausible"
+
+# Migrations run before the HTTP server starts listening; allow extra time.
+deploy_timeout: 180
+
+env:
+  clear:
+    BASE_URL: https://analytics.sifanu.com # PLACEHOLDER: must match proxy host
+    HTTP_PORT: 8000
+    TMPDIR: /var/lib/plausible/tmp
+    # Recommended after creating your account:
+    # DISABLE_REGISTRATION: invite_only
+    #
+    # Optional extras — see https://github.com/plausible/community-edition/wiki/configuration
+    # MAILER_ADAPTER: Bamboo.Mua
+    # MAILER_EMAIL: plausible@example.com
+    # SMTP_HOST_ADDR: smtp.example.com
+    # SMTP_HOST_PORT: 587
+    # SMTP_USER_NAME: postmaster@example.com
+    # MAXMIND_EDITION: GeoLite2-City
+  secret:
+    - SECRET_KEY_BASE
+    - TOTP_VAULT_KEY
+    - DATABASE_URL
+    - CLICKHOUSE_DATABASE_URL
+    # - SMTP_USER_PWD
+    # - MAXMIND_LICENSE_KEY
+    # - GOOGLE_CLIENT_ID
+    # - GOOGLE_CLIENT_SECRET
+
+accessories:
+  # Reachable from the app as "plausible-db" on the kamal network.
+  db:
+    image: postgres:16-alpine
+    host: 159.69.26.251 # PLACEHOLDER: same server IP
+    env:
+      clear:
+        POSTGRES_USER: plausible
+        POSTGRES_DB: plausible_db
+      secret:
+        - POSTGRES_PASSWORD
+    directories:
+      - data:/var/lib/postgresql/data
+
+  # Reachable from the app as "plausible-events-db" on the kamal network.
+  events-db:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    host: 159.69.26.251 # PLACEHOLDER: same server IP
+    env:
+      clear:
+        CLICKHOUSE_USER: plausible
+        CLICKHOUSE_DB: plausible_events_db
+      secret:
+        - CLICKHOUSE_PASSWORD
+    files:
+      - clickhouse/logs.xml:/etc/clickhouse-server/config.d/logs.xml:ro
+      # Bind to IPv4 only; the kamal Docker bridge network has no IPv6 by default.
+      - clickhouse/ipv4-only.xml:/etc/clickhouse-server/config.d/ipv4-only.xml:ro
+      # Low-resource tuning: https://clickhouse.com/docs/en/operations/tips#using-less-than-16gb-of-ram
+      - clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml:ro
+      - clickhouse/default-profile-low-resources-overrides.xml:/etc/clickhouse-server/users.d/default-profile-low-resources-overrides.xml:ro
+    directories:
+      - data:/var/lib/clickhouse
+      - logs:/var/log/clickhouse-server
+    options:
+      ulimit: "nofile=262144:262144"

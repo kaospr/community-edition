@@ -87,6 +87,47 @@ $ docker compose up -d
 >
 > If you know someone who might [find Plausible useful](https://plausible.io/?utm_medium=Social&utm_source=GitHub&utm_campaign=readme), we'd appreciate if you'd let them know.
 
+### Deploying with Kamal
+
+As an alternative to Docker Compose, this repository is set up to deploy Plausible CE to a single server with [Kamal 2](https://kamal-deploy.org): Postgres and ClickHouse run as Kamal accessories, and kamal-proxy terminates TLS with automatic Let's Encrypt certificates.
+
+#### Prerequisites
+
+- Kamal 2 installed locally: `gem install kamal`
+- Docker running locally (Kamal builds the image and hosts a local registry on port 5000)
+- A server (amd64) you can SSH into as root
+- A DNS A record for your domain pointing at the server, with ports 80 and 443 open
+
+#### First-time setup
+
+1. Edit `config/deploy.yml` and replace the PLACEHOLDER values: the server IP (3 occurrences) and your domain (`proxy.host` and `BASE_URL`).
+2. Set up your secrets in `.kamal/secrets`. The provided file fetches everything from 1Password via the [1Password CLI](https://developer.1password.com/docs/cli/get-started/) — replace the PLACEHOLDER account/vault/item names (see comments inside, including an `op item create` command to generate the secrets). Alternatively, copy `.kamal/secrets.example` over it for a plain file with literal values.
+
+3. Commit your changes — Kamal builds from the committed git state (`.kamal/secrets` stays untracked).
+4. Validate and deploy:
+
+   ```console
+   $ kamal config   # sanity-check the configuration
+   $ kamal setup    # installs Docker, boots Postgres + ClickHouse + proxy, deploys the app
+   ```
+
+   If the very first deploy races the databases' initialization, just run `kamal deploy` again.
+
+5. Visit `https://your-domain/register` to create the first account, then set `DISABLE_REGISTRATION: invite_only` in `config/deploy.yml` and run `kamal deploy`.
+
+#### Day-to-day
+
+```console
+$ kamal deploy                  # deploy config/env changes
+$ kamal app logs -f             # tail app logs
+$ kamal accessory logs db -f    # Postgres logs (events-db for ClickHouse)
+$ kamal details                 # status of app, proxy and accessories
+```
+
+To upgrade Plausible, bump the image tag in `Dockerfile` and run `kamal deploy` (migrations run automatically on boot).
+
+`compose.yml` is unaffected and remains usable for plain Docker Compose hosting as described above.
+
 ### Wiki
 
 For more information on installation, upgrades, configuration, and integrations please see our [wiki.](https://github.com/plausible/community-edition/wiki)
